@@ -1,0 +1,91 @@
+name: CI/CD Frontend Business Trips
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ---------- CI: test → build ----------
+  test:
+    name: Tests ausführen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  build:
+    name: App bauen
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
+          VITE_IMGS: ${{ vars.VITE_IMGS || 'items' }}
+
+  # ---------- RefCard 05: Image nach ECR, Deployment auf ECS (Fargate) ----------
+  deploy-ecs:
+    name: Image nach ECR pushen und ECS-Service aktualisieren
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      # AWS Academy Learner Lab: kein OIDC möglich -> temporäre Lab-Credentials als Secrets
+      - name: AWS-Credentials aus Learner-Lab-Session beziehen
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+
+      - name: Bei ECR anmelden
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # VITE_API_BASE_URL = URL des Backend-Load-Balancers (wird beim Build fest ins JS einkompiliert)
+      - name: Image bauen und nach ECR pushen
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          ECR_REPOSITORY: react-vite-frontend
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            --build-arg VITE_API_BASE_URL="${{ vars.VITE_API_BASE_URL }}" \
+            --build-arg VITE_IMGS="${{ vars.VITE_IMGS || 'items' }}" \
+            -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
+            -t "$ECR_REGISTRY/$ECR_REPOSITORY:latest" .
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+      - name: Task-Definition mit neuem Image aktualisieren
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: biztrips-frontend
+          image: ${{ steps.ecr-login.outputs.registry }}/react-vite-frontend:${{ github.sha }}
+
+      - name: ECS-Service deployen
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          cluster: biztripsFrontend
+          service: biztrips-frontend-service
+          wait-for-service-stability: true

@@ -1,40 +1,54 @@
-# React + Vite
+# RefCard 05 – React + Vite Frontend auf AWS (ECR, ECS)
 
-## Getting the starting point
+Frontend der BusinessTrips-Applikation (Trip-Liste + Wishlist). Teil der CI/CD-Übungssequenz
+**RefCard 02–05** (siehe [`docs/future/RefCard-03-RefCard-05-own-repos.md`](docs/future/RefCard-03-RefCard-05-own-repos.md))
+— dieses Repository ist der **Frontend-Teil von RefCard 05**: statischer Vite-Build, ausgeliefert
+von nginx in einem Container auf ECS Fargate.
 
-**Option A — fresh clone at the starting point**
+Das Backend liegt im eigenen Repo
+[`refcard-08-springboot-backend`](https://github.com/Koetbullar-Droide/refcard-08-springboot-backend),
+die lokale Gesamtumgebung (Frontend + Backend + MariaDB) im Ordner `refcard-05-compose`.
+
+## Lokal entwickeln
 
 ```bash
-git clone --branch v1-start https://github.com/bbwlc/refcard-03-fe-react-vite.git
-cd refcard-03-fe-react-vite
 npm install
-npm run dev
+npm run dev      # http://localhost:5173, Backend muss auf http://localhost:8080 laufen
+npm test         # Vitest
 ```
 
-**Option B — you already have the repo cloned**
+Die Backend-URL kommt aus `VITE_API_BASE_URL` (`.env`, Default `http://localhost:8080/`).
+
+## Docker-Image
+
+Multi-Stage-Build: Node baut `dist/` → nur nginx + statische Dateien im finalen Image
+([`nginx.conf`](nginx.conf) mit SPA-Fallback auf `index.html`).
+`VITE_API_BASE_URL` wird als **Build-Arg** übergeben, weil Vite den Wert beim Build fest ins JS einkompiliert.
 
 ```bash
-git fetch --tags
-git checkout v1-start
-npm install
-npm run dev
+docker build --build-arg VITE_API_BASE_URL=http://localhost:8080/ -t biztrips-frontend .
+docker run --rm -p 3000:80 biztrips-frontend   # → http://localhost:3000
 ```
 
-This puts you in a "detached HEAD" state at the tag — fine for exploring, but if you'll commit your own work, branch off it first:
+## Deployment auf AWS (RefCard 05)
 
-```bash
-git checkout -b my-work v1-start
+```
+Browser ─► ALB refcard05-frontend-alb :80 ─► Target Group (ip, :80, /) ─► ECS-Service (Fargate, nginx)
+   └── JS ruft auf ─► ALB refcard05-backend-alb ─► Backend-Service (siehe Backend-Repo) ─► RDS
 ```
 
-> The app calls a backend at `http://localhost:8080/v1/trips` (see the `RefCard-03-be-SpringBootBusinessTrips` project), so make sure that's running too for the trip list / wishlist to show real data.
+| Ressource | Name |
+| --- | --- |
+| ECR-Repository | `react-vite-frontend` |
+| ECS-Cluster / Service | `biztripsFrontend` / `biztrips-frontend-service` |
+| Task Definition | `biztrips-frontend` ([`task-definition.json`](task-definition.json)) |
+| Load Balancer | `refcard05-frontend-alb` → http://refcard05-frontend-alb-321770531.us-east-1.elb.amazonaws.com |
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- **Pipeline** ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)): `test` → `build` → `deploy-ecs`
+  (Image mit Tags `<commit-sha>` und `latest` nach ECR, Task Definition rendern, ECS-Service rolling aktualisieren).
+  `deploy-ecs` läuft nur bei Push auf `main`.
+- **Repository-Variable** `VITE_API_BASE_URL` = URL des Backend-Load-Balancers (mit `/` am Ende).
+- **Secrets** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`: temporäre
+  Learner-Lab-Credentials (kein OIDC im Learner Lab). Nach jedem Lab-Neustart mit
+  `scripts/set-aws-secrets.sh` im **Backend-Repo** erneuern — das Skript setzt sie in beiden Repos.
+- Die Infrastruktur für beide Services beschreibt `scripts/aws-setup.sh` im Backend-Repo.
