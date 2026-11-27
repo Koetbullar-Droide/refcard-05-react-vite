@@ -14,6 +14,14 @@ RUN npm run build
 
 # --- Stage 2: Runtime ---
 FROM nginx:1.27-alpine
+# Version aus dem Git-Tag (setzt die Pipeline): /version.json + Image-Label
+ARG APP_VERSION=dev
+ARG GIT_SHA=unknown
+LABEL org.opencontainers.image.version=$APP_VERSION \
+      org.opencontainers.image.revision=$GIT_SHA \
+      org.opencontainers.image.source=https://github.com/Koetbullar-Droide/refcard-05-react-vite
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+RUN printf '{"name":"biztrips-frontend","version":"%s","commit":"%s"}\n' "$APP_VERSION" "$GIT_SHA" \
+      > /usr/share/nginx/html/version.json
 EXPOSE 80
