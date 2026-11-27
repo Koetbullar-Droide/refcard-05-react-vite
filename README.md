@@ -9,7 +9,7 @@ von nginx in einem Container auf ECS Fargate.
 | --- | --- |
 | Frontend (dieses Repo) | http://refcard05-frontend-alb-321770531.us-east-1.elb.amazonaws.com |
 | Backend | Repo [`refcard-08-springboot-backend`](https://github.com/Koetbullar-Droide/refcard-08-springboot-backend) |
-| Lokale Gesamtumgebung | Repo `refcard-05-compose` (Frontend + Backend + MariaDB mit Docker Compose) |
+| Lokale Gesamtumgebung | [`docker-compose.yml` im Backend-Repo](https://github.com/Koetbullar-Droide/refcard-08-springboot-backend#gesamtsystem-lokal-starten-frontend--backend--datenbank) (Frontend + Backend + MariaDB) |
 
 ## Lokal entwickeln
 
@@ -22,7 +22,8 @@ npm test         # Vitest
 Die Backend-URL kommt aus `VITE_API_BASE_URL` (`.env`, Default `http://localhost:8080/`). `.env`
 enthält keine Geheimnisse und wird nicht ins Docker-Image kopiert (`.dockerignore`).
 
-Für Frontend, Backend und Datenbank zusammen siehe das Compose-Repo (`docker compose up --build`).
+Frontend, Backend und Datenbank zusammen: Backend-Repo daneben klonen, dort `docker compose up --build`
+(siehe Backend-README, Abschnitt *Gesamtsystem lokal starten*).
 
 ## Docker-Image
 
@@ -59,6 +60,8 @@ test ──► build ─┴─► deploy-ecs: Lab-Session prüfen → ECR-Login 
 ```
 
 - `test` und `build` laufen bei jedem Push und Pull Request (npm-Cache über `setup-node`).
+- Docker-Layer-Cache über `docker/build-push-action` (`type=gha`): `npm ci` im Image läuft nur neu,
+  wenn sich `package-lock.json` ändert. Main- und Tag-Runs laufen nacheinander (`concurrency`).
 - `deploy-ecs` läuft bei Push auf `main` und bei Tags `v*.*.*`.
 - **Repository-Variable** `VITE_API_BASE_URL` = URL des Backend-Load-Balancers (mit `/` am Ende).
   Fehlt sie, bricht der Job mit einer klaren Meldung ab.
@@ -95,13 +98,19 @@ das Infrastruktur-Skript (`scripts/aws-setup.sh`) findest du im Backend-README.
 
 ## Nachweise (Screenshots)
 
+Alle Screenshots liegen in [`docs/screenshots/`](docs/screenshots/).
+
 | Was | Screenshot |
 | --- | --- |
-| Commits und Tags | ![Commits](docs/screenshots/fe-01-commits.jpg) |
-| Pipeline-Run (alle Jobs grün, Version, Smoke-Test) | ![Workflow](docs/screenshots/fe-02-workflow-run.jpg) |
+| Commits | ![Commits](docs/screenshots/fe-01-commits.jpg) |
+| Git-Tag `v1.0.0` | ![Tags](docs/screenshots/fe-01-tags.jpg) |
+| Pipeline-Run für `v1.0.0` (alle Jobs grün) | ![Workflow](docs/screenshots/fe-02-workflow-run.jpg) |
+| Run-Zusammenfassung: Version, Vitest-Report, Image, Smoke-Test OK | ![Workflow-Summary](docs/screenshots/fe-02-workflow-summary.jpg) |
 | GitHub Secrets (Lab-Credentials) | ![Secrets](docs/screenshots/fe-03-secrets.jpg) |
 | Variable `VITE_API_BASE_URL` | ![Variables](docs/screenshots/fe-03-variables.jpg) |
-| ECR-Repository mit Versions-Tags | ![ECR](docs/screenshots/fe-04-ecr.jpg) |
-| ECS-Service (Deployment, laufender Task) | ![ECS](docs/screenshots/fe-05-ecs-service.jpg) |
-| App im Browser über den ALB | ![App](docs/screenshots/fe-06-app.jpg) |
-| `/version.json` über den ALB | ![Version](docs/screenshots/fe-07-version.jpg) |
+| ECR-Repository: Image mit Tags `v1.0.0`, Commit-SHA, `latest` | ![ECR](docs/screenshots/fe-04-ecr.jpg) |
+| ECS-Service: Deployment mit Circuit Breaker und Health-Checks | ![ECS](docs/screenshots/fe-05-ecs-service.jpg) |
+| App im Browser über den ALB | ![App](docs/screenshots/fe-06-app.png) |
+| `/version.json` über den ALB | ![Version](docs/screenshots/fe-07-version.png) |
+
+Die lokale Gesamtumgebung (Docker Compose) ist im Backend-README dokumentiert, inkl. Screenshots.
